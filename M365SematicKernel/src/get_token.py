@@ -53,7 +53,7 @@ def acquire_token():
     pca = PublicClientApplication(
         client_id=CLIENT_ID,
         authority=f"https://login.microsoftonline.com/{TENANT_ID}",
-        token_cache=TOKEN_CACHE,
+        token_cache=cache,
     )
 
     token_request = {
