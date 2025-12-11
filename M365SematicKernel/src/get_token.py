@@ -1,3 +1,4 @@
+import msal
 from msal import PublicClientApplication
 import logging
 import asyncio
@@ -6,8 +7,16 @@ from dotenv import load_dotenv
 import os
 from .local_token_cache import LocalTokenCache
 
+
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+# --- Fix: Initialize the cache object FIRST ---
+cache = msal.SerializableTokenCache()
+
+#cache file path
+CACHE_FILE = "./msal_cache.json"
+
 TOKEN_CACHE = LocalTokenCache("./.local_token_cache.json")
 
 # Configuration from your Azure AD App Registration
@@ -25,7 +34,22 @@ async def open_browser(url: str):
     logger.debug(f"Opening browser at {url}")
     await asyncio.get_event_loop().run_in_executor(None, lambda: webbrowser.open(url))
 
+def save_cache_on_exit():
+    if cache.has_state_changed:
+        print(f"Cache state changed. Saving to {CACHE_FILE}...")
+        with open(CACHE_FILE, "w") as f:
+            f.write(cache.serialize())
+
 def acquire_token():
+    # Load the cache from the file if it exists
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                cache.deserialize(f.read())
+            print(f"Loaded token cache from {CACHE_FILE}")
+        except Exception as e:
+            print(f"Error loading cache: {e}")
+
     pca = PublicClientApplication(
         client_id=CLIENT_ID,
         authority=f"https://login.microsoftonline.com/{TENANT_ID}",
@@ -35,6 +59,7 @@ def acquire_token():
     token_request = {
         "scopes": SCOPES,
     }
+
     accounts = pca.get_accounts()
     retry_interactive = False
     token = None

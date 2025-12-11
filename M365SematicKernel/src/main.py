@@ -1,9 +1,10 @@
 import requests
+import atexit
 import os   
 import asyncio
 import json
 import time
-from src.get_token import acquire_token
+from src.get_token import acquire_token, save_cache_on_exit
 from src.tooling import M365CopilotPlugin, LocalDocumentPlugin
 import sys
 import logging
@@ -28,6 +29,9 @@ AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")
 AZURE_AI_KEY = os.getenv("AZURE_AI_KEY")
 AZURE_AI_MODEL = os.getenv("AZURE_AI_MODEL")
 
+# Register the save_cache_on_exit function to be called when the program exits
+atexit.register(save_cache_on_exit)
+
 async def ainput(string: str) -> str:
     await asyncio.get_event_loop().run_in_executor(
         None, lambda s=string: sys.stdout.write(s + " ")
@@ -48,7 +52,7 @@ def create_conversation(token):
     }
     # An empty body is required to create a new conversation
     response = requests.post(f"{GRAPH_API_URL}/conversations", headers=headers, data=json.dumps({}))
-    print(f"Response: {response.json()}")
+    #print(f"Response: {response.json()}")
     response.raise_for_status()
     conversation_data = response.json()
     print(f"Created conversation with ID: {conversation_data['id']}")
@@ -106,9 +110,9 @@ async def main():
         if user_prompt.lower() == "exit":
             print("Exiting application...")
             print("\nCleaning up...")
-            #cleanup_result = kernel.invoke_function_call("M365CopilotChat", "end_conversation")
+            #cleanup_result = kernel.invoke_function_call("M365CopilotChat", "end_conversation")    
             print("\nGoodbye!")
-            break
+            sys.exit()
         
         if not user_prompt:
             continue
@@ -127,6 +131,7 @@ async def main():
     print("\nCleaning up...")
     #cleanup_result = kernel.invoke_plugin_function("M365CopilotChat", "end_conversation")
     print("\nGoodbye!")
+    sys.exit()
 
 
 if __name__ == "__main__":
