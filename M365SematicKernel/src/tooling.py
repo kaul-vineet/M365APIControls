@@ -1,29 +1,33 @@
 import io, urllib
 import json
+import os
+from dotenv import load_dotenv
 import requests
 from typing import Annotated, Optional 
 from docx import Document
 from semantic_kernel.functions.kernel_function_decorator import kernel_function
+
+load_dotenv()
 
 class M365CopilotPlugin:
     """
     A plugin to interact with the Microsoft Graph Beta Copilot Chat API.
     Assumes a valid delegated access token and conversation ID are provided upon initialization.
     """
-    GRAPH_API_BASE_URL = "https://graph.microsoft.com/beta/copilot"
 
-    def __init__(self, token: str, conversation_id: str):
+    def __init__(self):
         # We store necessary context when the plugin is initialized in Python
-        self.token = token
-        self.conversation_id = conversation_id
+        self.token = os.getenv("M365_TOKEN")
+        self.conversation_id = os.getenv("M365_CONVO_ID")
         # Define headers used for all requests within this plugin
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
         }
+        self.last_copilot_response: str = ""
 
     @kernel_function(
-        description="Sends a prompt to the M365 Copilot and waits for the response. Use this to get content, answers, or summaries that will be used in subsequent steps (like creating a document).",
+        description="Sends a prompt to the M365 Copilot for requesting any data from Outlook, mails, SharePoint, One Note, One Drive, and waits for the response. Use this to get content, answers, or summaries that will be used in subsequent steps (like creating a document).",
         name="sendMessageToCopilot"
     )
     def send_message_sync(
@@ -33,7 +37,7 @@ class M365CopilotPlugin:
         """
         Sends a single message to an existing conversation via the Graph API sync chat endpoint.
         """
-        url = f"{self.GRAPH_API_BASE_URL}/conversations/{self.conversation_id}/chat"
+        url = f"{os.getenv('GRAPH_API_URL')}/conversations/{self.conversation_id}/chat"
         
         payload = {
             "message": {
@@ -57,6 +61,7 @@ class M365CopilotPlugin:
             # The structure of the response might be complex. This attempts to extract the relevant text.
             try:
                 copilot_response_text = response_data['messages'][1]['text']
+                self.last_copilot_response = copilot_response_text
                 return copilot_response_text
             except (KeyError, IndexError):
                 return f"Error: Could not extract specific message text from response. Full data: {json.dumps(response_data)}"
@@ -68,7 +73,7 @@ class M365CopilotPlugin:
     @kernel_function(description="Terminates the current session and deletes conversation context. Call this ONLY when the user explicitly says 'exit', 'quit', or 'goodbye'.")
     def end_conversation(self) -> str:
         """Deletes the conversation resource."""
-        url = f"{self.GRAPH_API_BASE_URL}/conversations/{self.conversation_id}"
+        url = f"{os.getenv('GRAPH_API_URL')}/conversations/{self.conversation_id}"
         try:
             response = requests.delete(url, headers=self.headers)
             response.raise_for_status()
@@ -76,26 +81,30 @@ class M365CopilotPlugin:
         except requests.exceptions.RequestException as e:
             return f"Error ending conversation: {e}"
 
-class LocalDocumentPlugin:
+class LocalDocumentGeneratorPlugin:
     """
-    Plugin solely for generating a Word document file content locally in memory.
+    Plugin solely for generating a Word document file. Use for any request to generate a word document.
     """
     def __init__(self):
-        # No graph client needed for local generation
-        pass
+        # Store reference to the M365 plugin to access the last response
+        self.content = ""
 
-    @kernel_function(description="Creates a Word document file (.docx) in memory containing the provided text.")
+    @kernel_function(description="Creates a Word document file (.docx) in memory containing the provided text. Use for any request to generate a word document.")
     def generate_word_document_bytes(
         self,
         filename: Annotated[str, "The name of the file to create (e.g., 'ProjectSummary.docx')."],
-        content: Annotated[str, "The specific text to write into the document. **IMPORTANT:** This value MUST be the exact output string received from the `sendMessageToCopilot` tool. Do NOT ask the user for this content; pipe the previous result directly here."]
+        content: Annotated[str | None, "The text to write into the document."] = None
     ) -> Annotated[str, "A status message indicating the file content was generated"]:
         """
         Generates a Word file in an in-memory buffer.
         Note: In a real application, you might use the returned buffer object for further processing.
         """
         
-        # 1. Create the Word document in memory using python-docx
+        # 1. Resolve content
+        if not content:
+            return "Error: No content provided and no previous Copilot response found to use."
+
+        # 2. Create the Word document in memory using python-docx
         document = Document()
         document.add_paragraph(content)
         
@@ -116,16 +125,16 @@ class GraphSharePointUploaderPlugin:
     Plugin for uploading in-memory bytes to SharePoint using the Microsoft Graph API and an Access Token.
     Configured using Site URL and Library Name.
     """
-    def __init__(self, access_token: str, site_url: str, target_folder_path: str, generator_plugin: LocalDocumentPlugin):
-        self.access_token = access_token
+    def __init__(self, generator_plugin: LocalDocumentGeneratorPlugin):
+        self.access_token = os.getenv("M365_TOKEN")
 
         # Store a direct reference to the other plugin's instance
         self.generator_plugin_ref = generator_plugin 
 
         # Construct the correct base URL
-        self.base_url = f"{site_url}{target_folder_path}/"
+        self.base_url = f"{os.getenv('SITE_URL')}{os.getenv('FOLDER')}/"
 
-    @kernel_function(description="Uploads the previously generated in-memory Word document to SharePoint. This tool MUST be called immediately after `generate_word_document_bytes`.")
+    @kernel_function(description="Uploads the previously generated in-memory Word document to SharePoint. Use this tool to upload the Word document created in `generate_word_document_bytes` to SharePoint.")
     def upload_generated_file(
         self,
         target_folder_path: Annotated[str, "The destination folder path in the SharePoint library (e.g., 'Reports' or empty string per user request)."]
