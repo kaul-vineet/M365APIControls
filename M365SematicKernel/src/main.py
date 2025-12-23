@@ -1,11 +1,12 @@
-import requests
 import atexit
+from rich import print
+import requests
 import os   
 import asyncio
 import json
 import time
-from src.get_token import acquire_token, save_cache_on_exit
-from src.tooling import M365CopilotPlugin, LocalDocumentPlugin
+from src.auth import *   
+from src.tooling import M365CopilotPlugin, LocalDocumentPlugin, GraphSharePointUploaderPlugin
 import sys
 import logging
 from dotenv import load_dotenv
@@ -23,11 +24,13 @@ logging.getLogger("semantic_kernel").setLevel(logging.DEBUG) # Use DEBUG for max
 load_dotenv()
 
 # --- 1. Configuration (Use environment variables) ---
-# Ensure AZURE_AI_ENDPOINT, AZURE_AI_KEY, AZURE_AI_MODEL environment variables are set.
+# Ensure AZURE_AI_ENDPOINT, AZURE_AI_KEY, AZURE_AI_MODEL, SHAREPOINT environment variables are set.
 GRAPH_API_URL = os.getenv("GRAPH_API_URL") 
 AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")
 AZURE_AI_KEY = os.getenv("AZURE_AI_KEY")
 AZURE_AI_MODEL = os.getenv("AZURE_AI_MODEL")
+SITE_URL = os.environ["SITE_URL"]
+FOLDER = os.environ["FOLDER"]
 
 # Register the save_cache_on_exit function to be called when the program exits
 atexit.register(save_cache_on_exit)
@@ -63,20 +66,32 @@ async def main():
     Main orchestration script using Semantic Kernel configured with an Azure AI Foundry model
     and a command-line interface.
     """
+    print(f"[bold magenta] Starting Communications with M365 Copilot...[/]")
+
     # --- 2. Acquire Graph Access Token ---
-    print(f"Acquiring Graph Access Token...")
+    print(f"[blue] Acquiring Graph Access Token...[/]")
     os.environ["M365_TOKEN"] = get_access_token()
 
+    # --- 2. Acquire Graph Access Token ---
+    print(f"[magenta] Acquiring Non Interactive Graph Access Token...[/]")   
+    # os.environ["M365_NONINTERACTIVE_TOKEN"] = acquire_non_interactive_token()
+
     # --- 3. Create Conversation ---
-    print(f"Creating Conversation...")
-    os.environ["M365_CONVO_ID"]  = create_conversation(os.environ["M365_TOKEN"])
+    print(f"[green] Creating Conversation...[/]")
+    os.environ["M365_CONVO_ID"] = create_conversation(os.environ["M365_TOKEN"])
+
+   # --- 7. Check Required Environment Variables ---
+    print(f"[blue] Checking Required Environment Variables...[/]")
+    if not all([os.environ["AZURE_AI_ENDPOINT"], os.environ["AZURE_AI_KEY"], os.environ["AZURE_AI_MODEL"], os.environ["M365_TOKEN"], os.environ["M365_CONVO_ID"], os.environ["SITE_URL"]]):
+        print("Error: Required environment variables must be set.")
+        return
 
     # --- 4. Initialize Semantic Kernel ---
-    print(f"Initializing Semantic Kernel...")    
+    print(f"[blue] Initializing Semantic Kernel...[/]")    
     kernel = Kernel()
 
     # --- 5. Initialize the Semantic Kernel and Azure AI Foundry Service ---
-    print(f"Initializing Azure AI Foundry Service...")
+    print(f"[cyan] Initializing Azure AI Foundry Service...[/]")
     kernel.add_service(
         AzureChatCompletion(
             deployment_name=AZURE_AI_MODEL,
@@ -89,19 +104,15 @@ async def main():
     )
 
     # --- 6. Import the Plugin ---
-    print(f"Importing Plugin...")
-    m365copilot_chat_plugin = M365CopilotPlugin(token=os.environ["M365_TOKEN"], conversation_id=os.environ["M365_CONVO_ID"])
+    print(f"[green] Importing Plugin...[/]")
+    m365copilot_chat_plugin = M365CopilotPlugin(token=os.getenv("M365_TOKEN"), conversation_id=os.getenv("M365_CONVO_ID"))
     kernel.add_plugin(plugin_name="M365CopilotChat", plugin=m365copilot_chat_plugin)
     local_document_plugin = LocalDocumentPlugin()
     kernel.add_plugin(plugin_name="LocalDocumentPlugin", plugin=local_document_plugin)
+    graph_sharepoin_uploader_plugin = GraphSharePointUploaderPlugin(access_token=os.getenv("M365_TOKEN"), site_url=SITE_URL, target_folder_path=FOLDER, generator_plugin=local_document_plugin)
+    kernel.add_plugin(plugin_name="GraphSharePointUploaderPlugin", plugin=graph_sharepoin_uploader_plugin)
 
-    # --- 7. Check Required Environment Variables ---
-    print("Checking Required Environment Variables...")
-    if not all([os.environ["AZURE_AI_ENDPOINT"], os.environ["AZURE_AI_KEY"], os.environ["AZURE_AI_MODEL"], os.environ["M365_TOKEN"], os.environ["M365_CONVO_ID"]]):
-        print("Error: Required environment variables must be set.")
-        return
-
-    print(f"Kernel initialized and ready for input. Type 'exit' to quit.")
+    print(f"[bold magenta] Kernel initialized and ready for input. Type 'exit' to quit.[/]")
 
     # --- 4. The Command-Line Loop ---
     while True:
@@ -122,9 +133,9 @@ async def main():
         # Invoke the kernel: the LLM automatically decides to call the appropriate plugin function
         try:
             result = await kernel.invoke_prompt(prompt=user_prompt, settings=execution_settings)
-            print(f"\n<<< AI: {result}")
+            print(f"[blue] \n<<< AI:{result}[/]")
         except Exception as e:
-            print(f"\nAn error occurred during AI invocation: {e}")
+            print(f"[bold red] An error occurred during AI invocation: {e}[/]")
             break
 
     # Optional: Call the cleanup function after the loop terminates

@@ -27,8 +27,6 @@ TENANT_ID = "8b7a11d9-6513-4d54-a468-f6630df73c8b"
 SCOPES = ["https://graph.microsoft.com/.default"] 
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
-GRAPH_API_URL = "https://graph.microsoft.com/beta/copilot" # Using the beta endpoint for the Chat API
-
 
 async def open_browser(url: str):
     logger.debug(f"Opening browser at {url}")
@@ -48,7 +46,7 @@ def acquire_token():
                 cache.deserialize(f.read())
             print(f"Loaded token cache from {CACHE_FILE}")
         except Exception as e:
-            print(f"Error loading cache: {e}")
+            print(f"Error loading cache: {e}")  
 
     pca = PublicClientApplication(
         client_id=CLIENT_ID,
@@ -83,3 +81,18 @@ def acquire_token():
         token = response.get("access_token")
 
     return token
+
+    def acquire_non_interactive_token(tenant_id, client_id, client_secret):
+        # Acquires an access token using client credentials flow.
+        token_url = f"login.microsoftonline.com{tenant_id}/oauth2/v2.0/token"
+        payload = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'scope': 'https://graph.microsoft.com/.default',
+            'grant_type': 'client_credentials'
+        }
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+        response = requests.post(token_url, data=payload, headers=headers)
+        response.raise_for_status()
+        return response.json().get('access_token')
