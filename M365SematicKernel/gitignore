@@ -1,1 +1,4 @@
 .env
+.local_token_cache
+msal_cache.json
+src/local_token_cache
